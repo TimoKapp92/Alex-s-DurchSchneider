@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Alex's – DurchSchneider | Statik-Nachweis</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f9fafb; color: #222; }
+    h1 { font-size: 1.8em; margin-bottom: 10px; }
+    h2 { font-size: 1.3em; margin-top: 20px; }
+    .box { background: #fff; border: 1px solid #ccc; border-radius: 8px; padding: 16px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    label { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+    label span.label-text { flex: 1; }
+    input, select { flex: 0 0 120px; padding: 8px; font-size: 1em; }
+    .tooltip { margin-left: 6px; cursor: help; color: #2563eb; font-weight: bold; position: relative; }
+    .tooltip .tooltiptext { visibility: hidden; width: 220px; background: #333; color: #fff; text-align: left; border-radius: 6px; padding: 6px; position: absolute; z-index: 1; top: -5px; left: 105%; opacity: 0; transition: opacity 0.3s; font-size: 0.85em; }
+    .tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
+    button { margin-top: 15px; padding: 12px; width: 100%; max-width: 400px; font-size: 1.1em; border: none; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; font-weight: bold; }
+    button:hover { background: #1d4ed8; }
+    .error { color: red; margin-top: 10px; font-weight: bold; }
+    .ampel { font-size: 1.2em; margin-top: 15px; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+  <h1>Alex's – DurchSchneider</h1>
+  <p><b>Mit Hilfe unseres KI-Tools</b> erhältst du einen kleinen Statik-Nachweis für Wanddurchbrüche – schnell, verständlich, mobil nutzbar.</p>
+
+  <div class="box">
+    <h2>Eingaben</h2>
+    <label><span class="label-text">Öffnungsbreite b [m]</span><span class="tooltip">?<span class="tooltiptext">Breite der geplanten Öffnung in Metern.</span></span><input id="b" type="number" step="0.01" value="2.5"></label>
+    <label><span class="label-text">Öffnungshöhe h [m]</span><span class="tooltip">?<span class="tooltiptext">Höhe der geplanten Öffnung in Metern.</span></span><input id="h" type="number" step="0.01" value="2.1"></label>
+    <label><span class="label-text">Wandhöhe gesamt [m]</span><span class="tooltip">?<span class="tooltiptext">Gesamte Höhe der Wand vom Boden bis Decke.</span></span><input id="hw" type="number" step="0.01" value="2.6"></label>
+    <label><span class="label-text">Wanddicke d [m]</span><span class="tooltip">?<span class="tooltiptext">Stärke der Wand (z. B. 0.24m = 24cm).</span></span><input id="d" type="number" step="0.01" value="0.24"></label>
+    <label><span class="label-text">Materialdichte [kg/m³]</span><span class="tooltip">?<span class="tooltiptext">Wähle das Material der Wand (Beton, Ziegel, Porenbeton...).</span></span>
+      <select id="rho">
+        <option value="1800">Ziegel (1800)</option>
+        <option value="2200">Beton (2200)</option>
+        <option value="600">Porenbeton (600)</option>
+        <option value="400">Leichtbau (400)</option>
+      </select>
+    </label>
+    <label><span class="label-text">Anzahl Geschosse über Wand</span><span class="tooltip">?<span class="tooltiptext">Wie viele Geschosse lasten auf dieser Wand?</span></span><input id="n" type="number" step="1" value="1"></label>
+    <label><span class="label-text">Deckenlast pro Geschoss [kN/m²]</span><span class="tooltip">?<span class="tooltiptext">Durchschnittliche Last je Geschoss (z. B. 5 kN/m²).</span></span><input id="qDeck" type="number" step="0.1" value="5"></label>
+    <label><span class="label-text">Auflagerfläche pro Seite [cm²]</span><span class="tooltip">?<span class="tooltiptext">Fläche, auf der der Sturz/Träger je Seite aufliegt.</span></span><input id="Aauflager" type="number" step="1" value="300"></label>
+    <label><span class="label-text">Restwandbreite seitlich [m]</span><span class="tooltip">?<span class="tooltiptext">Seitliche Breite der Wandstücke, die stehen bleiben.</span></span><input id="rest" type="number" step="0.01" value="0.5"></label>
+    <button onclick="runAnalysis()">Berechnen</button>
+    <button onclick="generatePDF()">📄 Export als PDF</button>
+    <div id="errorMsg" class="error"></div>
+  </div>
+
+  <div class="box">
+    <h2>Ergebnisse</h2>
+    <div id="ausgabe"></div>
+  </div>
+
+<script>
+const CONVERT = { kN_to_N: 1000, cm2_to_m2: 1e-4, g: 9.81 };
+
+function getInputs() {
+  return {
+    b: parseFloat(document.getElementById('b').value),
+    h: parseFloat(document.getElementById('h').value),
+    hw: parseFloat(document.getElementById('hw').value),
+    d: parseFloat(document.getElementById('d').value),
+    rho: parseFloat(document.getElementById('rho').value),
+    n: parseInt(document.getElementById('n').value),
+    qDeck: parseFloat(document.getElementById('qDeck').value),
+    Aauflager: parseFloat(document.getElementById('Aauflager').value),
+    rest: parseFloat(document.getElementById('rest').value)
+  };
+}
+
+function validateInputs(inputs) {
+  const limits = { b:[0.5,10], h:[0.5,5], hw:[1.5,20], d:[0.05,1], rho:[300,3000], n:[0,10], qDeck:[1,15], Aauflager:[50,5000], rest:[0.1,5] };
+  for (let key in inputs) {
+    if (isNaN(inputs[key]) || inputs[key] <= 0) { document.getElementById("errorMsg").innerText = `Bitte gültige Werte für ${key} angeben.`; return false; }
+    if (limits[key] && (inputs[key] < limits[key][0] || inputs[key] > limits[key][1])) { document.getElementById("errorMsg").innerText = `${key} außerhalb plausibler Grenzen (${limits[key][0]}–${limits[key][1]}).`; return false; }
+  }
+  document.getElementById("errorMsg").innerText = ""; return true;
+}
+
+function calculate(inputs) {
+  const lastdreieck = 0.5 * inputs.b * (inputs.b/2) * inputs.d * inputs.rho * CONVERT.g;
+  const zusatzlast = inputs.n * inputs.qDeck * inputs.b * inputs.d * CONVERT.kN_to_N;
+  const Qges = lastdreieck + zusatzlast;
+  const q = Qges / inputs.b;
+
+  const moment = q * Math.pow(inputs.b,2)/8;
+  const querkraft = q * inputs.b/2;
+  const N_auflager = querkraft/2;
+  const sigma = N_auflager / (inputs.Aauflager * CONVERT.cm2_to_m2);
+  const schlankheitsgrad = inputs.rest / inputs.hw;
+
+  let beurteilung;
+  if (moment/1000 < 25 && sigma < 2e6 && schlankheitsgrad > 0.1) { beurteilung = "🟢 Öffnung unkritisch."; }
+  else if (moment/1000 < 50 && sigma < 3e6) { beurteilung = "🟡 Grenzwertig – prüfen."; }
+  else { beurteilung = "🔴 Statiker erforderlich!"; }
+
+  return {lastdreieck, zusatzlast, Qges, q, moment, querkraft, N_auflager, sigma, schlankheitsgrad, beurteilung};
+}
+
+function renderOutput(results) {
+  document.getElementById('ausgabe').innerHTML = `
+    <p><b>Lastannahmen</b></p>
+    <p>Eigengewicht Lastdreieck: ${(results.lastdreieck/1000).toFixed(1)} kN</p>
+    <p>Zusatzlast Decke: ${(results.zusatzlast/1000).toFixed(1)} kN</p>
+    <p>Gesamtlast Q: ${(results.Qges/1000).toFixed(1)} kN</p>
+
+    <p><b>Bemessung</b></p>
+    <p>Biegemoment M = ${(results.moment/1000).toFixed(2)} kNm</p>
+    <p>Querkraft Q = ${(results.querkraft/1000).toFixed(2)} kN</p>
+
+    <p><b>Auflagerkräfte</b></p>
+    <p>N je Seite = ${(results.N_auflager/1000).toFixed(2)} kN</p>
+    <p>Pressung sigma = ${(results.sigma/1e6).toFixed(2)} N/mm²</p>
+
+    <p><b>Stabilität Restwand</b></p>
+    <p>Schlankheitsgrad = ${results.schlankheitsgrad.toFixed(2)}</p>
+
+    <p class="ampel">${results.beurteilung}</p>
+  `;
+}
+
+function runAnalysis() {
+  const inputs = getInputs();
+  if (!validateInputs(inputs)) return;
+  const results = calculate(inputs);
+  renderOutput(results);
+}
+
+function generatePDF() {
+  const { jsPDF } = window.jspdf;
+  const inputs = getInputs();
+  if (!validateInputs(inputs)) return;
+  const results = calculate(inputs);
+  const doc = new jsPDF();
+  doc.setFontSize(16); doc.text("Alex's – DurchSchneider", 10, 15);
+  doc.setFontSize(12); doc.text("Nachweis Wanddurchbruch:", 10, 25);
+  const rows = [
+    ["Lastdreieck", (results.lastdreieck/1000).toFixed(1)+" kN"],
+    ["Zusatzlast", (results.zusatzlast/1000).toFixed(1)+" kN"],
+    ["Gesamtlast", (results.Qges/1000).toFixed(1)+" kN"],
+    ["Moment M", (results.moment/1000).toFixed(2)+" kNm"],
+    ["Querkraft Q", (results.querkraft/1000).toFixed(2)+" kN"],
+    ["Auflagerkraft", (results.N_auflager/1000).toFixed(2)+" kN"],
+    ["Pressung sigma", (results.sigma/1e6).toFixed(2)+" N/mm²"],
+    ["Schlankheitsgrad", results.schlankheitsgrad.toFixed(2)],
+    ["Bewertung", results.beurteilung]
+  ];
+  doc.autoTable({ head: [["Größe", "Wert"]], body: rows, startY: 35, styles: { fontSize: 11 }, headStyles: { fillColor: [37, 99, 235], textColor: 255, halign: "center" }, tableWidth: 'wrap', columnStyles: { 0: { cellWidth: 70 }, 1: { cellWidth: 100 } } });
+  doc.setFontSize(10); doc.text("Automatisch generierter Nachweis – Alex's DurchSchneider",10, doc.lastAutoTable.finalY + 10);
+  window.open(doc.output("bloburl"),"_blank");
+}
+</script>
+</body>
+</html>
